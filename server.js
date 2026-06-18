@@ -1,0 +1,73 @@
+/*  Chandra Color Shoppee — WhatsApp OTP relay (Render / Node web service)
+ *  The app POSTs { mobile, otp, secret } here; this service calls Meta's
+ *  WhatsApp Cloud API to deliver the OTP. Your Meta token stays here, never
+ *  on the public app page.
+ *
+ *  Set these in Render → your service → Environment:
+ *    META_TOKEN       = your permanent WhatsApp access token
+ *    PHONE_NUMBER_ID  = your WhatsApp phone number ID
+ *    TEMPLATE_NAME    = approved OTP template name (e.g. ccs_otp)
+ *    TEMPLATE_LANG    = template language code (e.g. en or en_US)
+ *    SHARED_SECRET    = the same value you paste in the app
+ *    DEFAULT_CC       = default country code digits, e.g. 91   (optional)
+ *  (PORT is provided by Render automatically.)
+ */
+const express = require("express");
+const app = express();
+app.use(express.json());
+
+// CORS so the app page (github.io) can POST here
+app.use((req, res, next) => {
+  res.set("Access-Control-Allow-Origin", "*");
+  res.set("Access-Control-Allow-Methods", "POST, OPTIONS");
+  res.set("Access-Control-Allow-Headers", "Content-Type");
+  if (req.method === "OPTIONS") return res.sendStatus(204);
+  next();
+});
+
+app.get("/", (_req, res) => res.send("CCS WhatsApp OTP relay is running."));
+
+app.post("/", async (req, res) => {
+  const { mobile, otp, secret } = req.body || {};
+  if (!process.env.SHARED_SECRET || secret !== process.env.SHARED_SECRET)
+    return res.status(401).json({ error: "unauthorized" });
+  if (!mobile || !otp)
+    return res.status(400).json({ error: "mobile and otp required" });
+
+  let to = ("" + mobile).replace(/\D/g, "");
+  const cc = (process.env.DEFAULT_CC || "").replace(/\D/g, "");
+  if (cc && to.length <= 10) to = cc + to;
+
+  const payload = {
+    messaging_product: "whatsapp",
+    to,
+    type: "template",
+    template: {
+      name: process.env.TEMPLATE_NAME,
+      language: { code: process.env.TEMPLATE_LANG || "en" },
+      components: [
+        { type: "body", parameters: [{ type: "text", text: "" + otp }] },
+        // Meta "Authentication" templates require the OTP echoed on the copy-code button.
+        // If your template has NO button, delete the next line.
+        { type: "button", sub_type: "url", index: "0", parameters: [{ type: "text", text: "" + otp }] },
+      ],
+    },
+  };
+
+  try {
+    const r = await fetch(
+      `https://graph.facebook.com/v20.0/${process.env.PHONE_NUMBER_ID}/messages`,
+      { method: "POST",
+        headers: { Authorization: `Bearer ${process.env.META_TOKEN}`,
+                   "Content-Type": "application/json" },
+        body: JSON.stringify(payload) }
+    );
+    const out = await r.json().catch(() => ({}));
+    return res.status(r.ok ? 200 : 502).json({ ok: r.ok, status: r.status, meta: out });
+  } catch (e) {
+    return res.status(502).json({ ok: false, error: String(e) });
+  }
+});
+
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => console.log("OTP relay listening on " + PORT));
