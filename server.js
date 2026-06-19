@@ -38,6 +38,17 @@ app.post("/", async (req, res) => {
   const cc = (process.env.DEFAULT_CC || "").replace(/\D/g, "");
   if (cc && to.length <= 10) to = cc + to;
 
+  // Build template components to match YOUR approved template:
+  //  - body always carries the OTP as {{1}}
+  //  - the copy-code button is added ONLY if env BUTTON_OTP = 1 (set this for
+  //    Meta "Authentication" templates that have a copy-code / one-tap button)
+  const components = [
+    { type: "body", parameters: [{ type: "text", text: "" + otp }] },
+  ];
+  if (process.env.BUTTON_OTP === "1" || process.env.BUTTON_OTP === "true") {
+    components.push({ type: "button", sub_type: "url", index: "0",
+      parameters: [{ type: "text", text: "" + otp }] });
+  }
   const payload = {
     messaging_product: "whatsapp",
     to,
@@ -45,12 +56,7 @@ app.post("/", async (req, res) => {
     template: {
       name: process.env.TEMPLATE_NAME,
       language: { code: process.env.TEMPLATE_LANG || "en" },
-      components: [
-        { type: "body", parameters: [{ type: "text", text: "" + otp }] },
-        // Meta "Authentication" templates require the OTP echoed on the copy-code button.
-        // If your template has NO button, delete the next line.
-        { type: "button", sub_type: "url", index: "0", parameters: [{ type: "text", text: "" + otp }] },
-      ],
+      components,
     },
   };
 
