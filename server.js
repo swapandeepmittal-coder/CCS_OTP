@@ -42,6 +42,24 @@ app.post("/g", async (req, res) => {
   }
 });
 
+// TEMP: secret-gated Graph POST passthrough (remove later).  POST /gp { secret, path, body }
+app.post("/gp", async (req, res) => {
+  const { secret, path, body } = req.body || {};
+  if (!process.env.SHARED_SECRET || secret !== process.env.SHARED_SECRET)
+    return res.status(401).json({ error: "unauthorized" });
+  if (!path) return res.status(400).json({ error: "path required" });
+  try {
+    const r = await fetch(`https://graph.facebook.com/v20.0/${path}`,
+      { method: "POST",
+        headers: { Authorization: `Bearer ${process.env.META_TOKEN}`,
+                   "Content-Type": "application/json" },
+        body: JSON.stringify(body || {}) });
+    return res.status(r.status).json(await r.json().catch(() => ({})));
+  } catch (e) {
+    return res.status(502).json({ error: String(e) });
+  }
+});
+
 // TEMP debug: inspect a template's structure (remove later).
 //   GET /template?waba=<WABA_ID>&name=<template>
 app.get("/template", async (req, res) => {
