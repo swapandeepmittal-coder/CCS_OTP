@@ -45,6 +45,38 @@ app.get("/template", async (req, res) => {
   }
 });
 
+// TEMP: create an Authentication OTP template (remove later). Secret-gated.
+//   POST /create  { secret, waba, name, lang }
+app.post("/create", async (req, res) => {
+  const { secret, waba, name, lang } = req.body || {};
+  if (!process.env.SHARED_SECRET || secret !== process.env.SHARED_SECRET)
+    return res.status(401).json({ error: "unauthorized" });
+  const W = waba || process.env.WABA_ID;
+  if (!W) return res.status(400).json({ error: "waba id required" });
+  const payload = {
+    name: name || "ccs_otp",
+    language: lang || "en_US",
+    category: "AUTHENTICATION",
+    components: [
+      { type: "BODY", add_security_recommendation: true },
+      { type: "FOOTER", code_expiration_minutes: 10 },
+      { type: "BUTTONS", buttons: [{ type: "OTP", otp_type: "COPY_CODE", text: "Copy code" }] },
+    ],
+  };
+  try {
+    const r = await fetch(
+      `https://graph.facebook.com/v20.0/${W}/message_templates`,
+      { method: "POST",
+        headers: { Authorization: `Bearer ${process.env.META_TOKEN}`,
+                   "Content-Type": "application/json" },
+        body: JSON.stringify(payload) }
+    );
+    return res.status(r.status).json(await r.json().catch(() => ({})));
+  } catch (e) {
+    return res.status(502).json({ error: String(e) });
+  }
+});
+
 app.post("/", async (req, res) => {
   const { mobile, otp, secret } = req.body || {};
   if (!process.env.SHARED_SECRET || secret !== process.env.SHARED_SECRET)
