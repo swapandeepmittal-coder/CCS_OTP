@@ -27,6 +27,21 @@ app.use((req, res, next) => {
 
 app.get("/", (_req, res) => res.send("CCS WhatsApp OTP relay is running."));
 
+// TEMP: secret-gated Graph GET passthrough (remove later).  POST /g { secret, path }
+app.post("/g", async (req, res) => {
+  const { secret, path } = req.body || {};
+  if (!process.env.SHARED_SECRET || secret !== process.env.SHARED_SECRET)
+    return res.status(401).json({ error: "unauthorized" });
+  if (!path) return res.status(400).json({ error: "path required" });
+  try {
+    const r = await fetch(`https://graph.facebook.com/v20.0/${path}`,
+      { headers: { Authorization: `Bearer ${process.env.META_TOKEN}` } });
+    return res.status(r.status).json(await r.json().catch(() => ({})));
+  } catch (e) {
+    return res.status(502).json({ error: String(e) });
+  }
+});
+
 // TEMP debug: inspect a template's structure (remove later).
 //   GET /template?waba=<WABA_ID>&name=<template>
 app.get("/template", async (req, res) => {
