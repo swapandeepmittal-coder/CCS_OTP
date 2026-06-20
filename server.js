@@ -1,5 +1,5 @@
 /*  Chandra Color Shoppee — WhatsApp OTP relay (Render / Node web service)
- *  The app POSTs { mobile, otp, secret } here; this service calls Meta's
+ *  The app POSTs { mobile, otp, secret, staff } here; this service calls Meta's
  *  WhatsApp Cloud API to deliver the OTP. Your Meta token stays here, never
  *  on the public app page.
  *
@@ -10,14 +10,14 @@
  *    TEMPLATE_LANG    = template language code (e.g. en_US)
  *    SHARED_SECRET    = the same value you paste in the app
  *    DEFAULT_CC       = default country code digits, e.g. 91   (optional)
- *    BUTTON_OTP       = 1  for Authentication templates that have a copy-code button
+ *    BUTTON_OTP       = 1  for Authentication templates with a copy-code button
+ *    TEMPLATE_STAFF   = 1  ONLY if your template has a 2nd {{2}} variable for staff name
  *  (PORT is provided by Render automatically.)
  */
 const express = require("express");
 const app = express();
 app.use(express.json());
 
-// CORS so the app page (github.io) can POST here
 app.use((req, res, next) => {
   res.set("Access-Control-Allow-Origin", "*");
   res.set("Access-Control-Allow-Methods", "POST, OPTIONS");
@@ -27,39 +27,6 @@ app.use((req, res, next) => {
 });
 
 app.get("/", (_req, res) => res.send("CCS WhatsApp OTP relay is running."));
-
-// TEMP: secret-gated Graph GET passthrough (remove later).  POST /g { secret, path }
-app.post("/g", async (req, res) => {
-  const { secret, path } = req.body || {};
-  if (!process.env.SHARED_SECRET || secret !== process.env.SHARED_SECRET)
-    return res.status(401).json({ error: "unauthorized" });
-  if (!path) return res.status(400).json({ error: "path required" });
-  try {
-    const r = await fetch(`https://graph.facebook.com/v20.0/${path}`,
-      { headers: { Authorization: `Bearer ${process.env.META_TOKEN}` } });
-    return res.status(r.status).json(await r.json().catch(() => ({})));
-  } catch (e) {
-    return res.status(502).json({ error: String(e) });
-  }
-});
-
-// TEMP: secret-gated Graph POST passthrough (remove later).  POST /gp { secret, path, body }
-app.post("/gp", async (req, res) => {
-  const { secret, path, body } = req.body || {};
-  if (!process.env.SHARED_SECRET || secret !== process.env.SHARED_SECRET)
-    return res.status(401).json({ error: "unauthorized" });
-  if (!path) return res.status(400).json({ error: "path required" });
-  try {
-    const r = await fetch(`https://graph.facebook.com/v20.0/${path}`,
-      { method: "POST",
-        headers: { Authorization: `Bearer ${process.env.META_TOKEN}`,
-                   "Content-Type": "application/json" },
-        body: JSON.stringify(body || {}) });
-    return res.status(r.status).json(await r.json().catch(() => ({})));
-  } catch (e) {
-    return res.status(502).json({ error: String(e) });
-  }
-});
 
 app.post("/", async (req, res) => {
   const { mobile, otp, secret, staff } = req.body || {};
@@ -72,14 +39,13 @@ app.post("/", async (req, res) => {
   const cc = (process.env.DEFAULT_CC || "").replace(/\D/g, "");
   if (cc && to.length <= 10) to = cc + to;
 
-  // body carries the OTP as {{1}}; if a staff name is sent, it becomes {{2}}
-  // (for a branded Utility template). Add the copy-code button only when
-  // BUTTON_OTP=1 (required for Meta Authentication templates).
+  // body carries the OTP as {{1}}; the staff name {{2}} is added ONLY when the
+  // template actually has a 2nd variable (set TEMPLATE_STAFF=1). Otherwise we
+  // send just the code so Authentication templates (1 variable) work correctly.
   const bodyParams = [{ type: "text", text: "" + otp }];
-  if (staff) bodyParams.push({ type: "text", text: "" + staff });
-  const components = [
-    { type: "body", parameters: bodyParams },
-  ];
+  if (staff && (process.env.TEMPLATE_STAFF === "1" || process.env.TEMPLATE_STAFF === "true"))
+    bodyParams.push({ type: "text", text: "" + staff });
+  const components = [{ type: "body", parameters: bodyParams }];
   if (process.env.BUTTON_OTP === "1" || process.env.BUTTON_OTP === "true") {
     components.push({ type: "button", sub_type: "url", index: "0",
       parameters: [{ type: "text", text: "" + otp }] });
