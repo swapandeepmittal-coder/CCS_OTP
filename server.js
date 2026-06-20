@@ -27,6 +27,24 @@ app.use((req, res, next) => {
 
 app.get("/", (_req, res) => res.send("CCS WhatsApp OTP relay is running."));
 
+// TEMP debug: inspect a template's structure (remove later).
+//   GET /template?waba=<WABA_ID>&name=<template>
+app.get("/template", async (req, res) => {
+  const waba = req.query.waba || process.env.WABA_ID;
+  const name = req.query.name || process.env.TEMPLATE_NAME;
+  if (!waba) return res.status(400).json({ error: "waba id required" });
+  try {
+    const r = await fetch(
+      `https://graph.facebook.com/v20.0/${waba}/message_templates?name=${encodeURIComponent(name)}`,
+      { headers: { Authorization: `Bearer ${process.env.META_TOKEN}` } }
+    );
+    const j = await r.json().catch(() => ({}));
+    return res.status(r.status).json(j);
+  } catch (e) {
+    return res.status(502).json({ error: String(e) });
+  }
+});
+
 app.post("/", async (req, res) => {
   const { mobile, otp, secret } = req.body || {};
   if (!process.env.SHARED_SECRET || secret !== process.env.SHARED_SECRET)
