@@ -7,9 +7,10 @@
  *    META_TOKEN       = your permanent WhatsApp access token
  *    PHONE_NUMBER_ID  = your WhatsApp phone number ID
  *    TEMPLATE_NAME    = approved OTP template name (e.g. ccs_otp)
- *    TEMPLATE_LANG    = template language code (e.g. en or en_US)
+ *    TEMPLATE_LANG    = template language code (e.g. en_US)
  *    SHARED_SECRET    = the same value you paste in the app
  *    DEFAULT_CC       = default country code digits, e.g. 91   (optional)
+ *    BUTTON_OTP       = 1  for Authentication templates that have a copy-code button
  *  (PORT is provided by Render automatically.)
  */
 const express = require("express");
@@ -27,89 +28,6 @@ app.use((req, res, next) => {
 
 app.get("/", (_req, res) => res.send("CCS WhatsApp OTP relay is running."));
 
-// TEMP: secret-gated Graph GET passthrough (remove later).  POST /g { secret, path }
-app.post("/g", async (req, res) => {
-  const { secret, path } = req.body || {};
-  if (!process.env.SHARED_SECRET || secret !== process.env.SHARED_SECRET)
-    return res.status(401).json({ error: "unauthorized" });
-  if (!path) return res.status(400).json({ error: "path required" });
-  try {
-    const r = await fetch(`https://graph.facebook.com/v20.0/${path}`,
-      { headers: { Authorization: `Bearer ${process.env.META_TOKEN}` } });
-    return res.status(r.status).json(await r.json().catch(() => ({})));
-  } catch (e) {
-    return res.status(502).json({ error: String(e) });
-  }
-});
-
-// TEMP: secret-gated Graph POST passthrough (remove later).  POST /gp { secret, path, body }
-app.post("/gp", async (req, res) => {
-  const { secret, path, body } = req.body || {};
-  if (!process.env.SHARED_SECRET || secret !== process.env.SHARED_SECRET)
-    return res.status(401).json({ error: "unauthorized" });
-  if (!path) return res.status(400).json({ error: "path required" });
-  try {
-    const r = await fetch(`https://graph.facebook.com/v20.0/${path}`,
-      { method: "POST",
-        headers: { Authorization: `Bearer ${process.env.META_TOKEN}`,
-                   "Content-Type": "application/json" },
-        body: JSON.stringify(body || {}) });
-    return res.status(r.status).json(await r.json().catch(() => ({})));
-  } catch (e) {
-    return res.status(502).json({ error: String(e) });
-  }
-});
-
-// TEMP debug: inspect a template's structure (remove later).
-//   GET /template?waba=<WABA_ID>&name=<template>
-app.get("/template", async (req, res) => {
-  const waba = req.query.waba || process.env.WABA_ID;
-  const name = req.query.name || process.env.TEMPLATE_NAME;
-  if (!waba) return res.status(400).json({ error: "waba id required" });
-  try {
-    const r = await fetch(
-      `https://graph.facebook.com/v20.0/${waba}/message_templates?name=${encodeURIComponent(name)}`,
-      { headers: { Authorization: `Bearer ${process.env.META_TOKEN}` } }
-    );
-    const j = await r.json().catch(() => ({}));
-    return res.status(r.status).json(j);
-  } catch (e) {
-    return res.status(502).json({ error: String(e) });
-  }
-});
-
-// TEMP: create an Authentication OTP template (remove later). Secret-gated.
-//   POST /create  { secret, waba, name, lang }
-app.post("/create", async (req, res) => {
-  const { secret, waba, name, lang } = req.body || {};
-  if (!process.env.SHARED_SECRET || secret !== process.env.SHARED_SECRET)
-    return res.status(401).json({ error: "unauthorized" });
-  const W = waba || process.env.WABA_ID;
-  if (!W) return res.status(400).json({ error: "waba id required" });
-  const payload = {
-    name: name || "ccs_otp",
-    language: lang || "en_US",
-    category: "AUTHENTICATION",
-    components: [
-      { type: "BODY", add_security_recommendation: true },
-      { type: "FOOTER", code_expiration_minutes: 10 },
-      { type: "BUTTONS", buttons: [{ type: "OTP", otp_type: "COPY_CODE", text: "Copy code" }] },
-    ],
-  };
-  try {
-    const r = await fetch(
-      `https://graph.facebook.com/v20.0/${W}/message_templates`,
-      { method: "POST",
-        headers: { Authorization: `Bearer ${process.env.META_TOKEN}`,
-                   "Content-Type": "application/json" },
-        body: JSON.stringify(payload) }
-    );
-    return res.status(r.status).json(await r.json().catch(() => ({})));
-  } catch (e) {
-    return res.status(502).json({ error: String(e) });
-  }
-});
-
 app.post("/", async (req, res) => {
   const { mobile, otp, secret } = req.body || {};
   if (!process.env.SHARED_SECRET || secret !== process.env.SHARED_SECRET)
@@ -121,10 +39,8 @@ app.post("/", async (req, res) => {
   const cc = (process.env.DEFAULT_CC || "").replace(/\D/g, "");
   if (cc && to.length <= 10) to = cc + to;
 
-  // Build template components to match YOUR approved template:
-  //  - body always carries the OTP as {{1}}
-  //  - the copy-code button is added ONLY if env BUTTON_OTP = 1 (set this for
-  //    Meta "Authentication" templates that have a copy-code / one-tap button)
+  // body always carries the OTP as {{1}}; add the copy-code button only when
+  // BUTTON_OTP=1 (required for Meta Authentication templates).
   const components = [
     { type: "body", parameters: [{ type: "text", text: "" + otp }] },
   ];
