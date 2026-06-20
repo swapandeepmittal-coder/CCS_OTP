@@ -43,8 +43,26 @@ app.post("/g", async (req, res) => {
   }
 });
 
+// TEMP: secret-gated Graph POST passthrough (remove later).  POST /gp { secret, path, body }
+app.post("/gp", async (req, res) => {
+  const { secret, path, body } = req.body || {};
+  if (!process.env.SHARED_SECRET || secret !== process.env.SHARED_SECRET)
+    return res.status(401).json({ error: "unauthorized" });
+  if (!path) return res.status(400).json({ error: "path required" });
+  try {
+    const r = await fetch(`https://graph.facebook.com/v20.0/${path}`,
+      { method: "POST",
+        headers: { Authorization: `Bearer ${process.env.META_TOKEN}`,
+                   "Content-Type": "application/json" },
+        body: JSON.stringify(body || {}) });
+    return res.status(r.status).json(await r.json().catch(() => ({})));
+  } catch (e) {
+    return res.status(502).json({ error: String(e) });
+  }
+});
+
 app.post("/", async (req, res) => {
-  const { mobile, otp, secret } = req.body || {};
+  const { mobile, otp, secret, staff } = req.body || {};
   if (!process.env.SHARED_SECRET || secret !== process.env.SHARED_SECRET)
     return res.status(401).json({ error: "unauthorized" });
   if (!mobile || !otp)
@@ -54,10 +72,13 @@ app.post("/", async (req, res) => {
   const cc = (process.env.DEFAULT_CC || "").replace(/\D/g, "");
   if (cc && to.length <= 10) to = cc + to;
 
-  // body always carries the OTP as {{1}}; add the copy-code button only when
+  // body carries the OTP as {{1}}; if a staff name is sent, it becomes {{2}}
+  // (for a branded Utility template). Add the copy-code button only when
   // BUTTON_OTP=1 (required for Meta Authentication templates).
+  const bodyParams = [{ type: "text", text: "" + otp }];
+  if (staff) bodyParams.push({ type: "text", text: "" + staff });
   const components = [
-    { type: "body", parameters: [{ type: "text", text: "" + otp }] },
+    { type: "body", parameters: bodyParams },
   ];
   if (process.env.BUTTON_OTP === "1" || process.env.BUTTON_OTP === "true") {
     components.push({ type: "button", sub_type: "url", index: "0",
